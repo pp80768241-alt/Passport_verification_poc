@@ -4,9 +4,6 @@ from dataclasses import dataclass
 
 from passport_verification.models import VerificationRequest
 
-# Development safety limit only — not a confirmed business requirement.
-DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
-
 
 @dataclass(frozen=True)
 class ValidationResult:
@@ -20,7 +17,6 @@ def _is_non_empty_string(value: object) -> bool:
 
 def validate_request_payload(
     payload: dict[str, object] | None,
-    max_image_bytes: int = DEFAULT_MAX_IMAGE_BYTES,
 ) -> ValidationResult:
     if payload is None:
         return ValidationResult(is_valid=False)
@@ -45,9 +41,6 @@ def validate_request_payload(
         return ValidationResult(is_valid=False)
 
     if len(decoded_image) == 0:
-        return ValidationResult(is_valid=False)
-
-    if len(decoded_image) > max_image_bytes:
         return ValidationResult(is_valid=False)
 
     return ValidationResult(

@@ -1,7 +1,6 @@
 import base64
 
 from passport_verification.validation import (
-    DEFAULT_MAX_IMAGE_BYTES,
     validate_request_payload,
 )
 
@@ -59,35 +58,6 @@ def test_empty_decoded_image():
             "last_name": "Doe",
             "passport_image": base64.b64encode(b"").decode("ascii"),
         }
-    )
-
-    assert result.is_valid is False
-
-
-def test_exceeds_dev_safety_limit(synthetic_image_base64):
-    oversized = base64.b64encode(b"x" * (DEFAULT_MAX_IMAGE_BYTES + 1)).decode("ascii")
-
-    result = validate_request_payload(
-        {
-            "first_name": "Jane",
-            "last_name": "Doe",
-            "passport_image": oversized,
-        }
-    )
-
-    assert result.is_valid is False
-
-
-def test_custom_dev_safety_limit_allows_smaller_limit(synthetic_image_base64):
-    small_limit = 10
-
-    result = validate_request_payload(
-        {
-            "first_name": "Jane",
-            "last_name": "Doe",
-            "passport_image": synthetic_image_base64,
-        },
-        max_image_bytes=small_limit,
     )
 
     assert result.is_valid is False

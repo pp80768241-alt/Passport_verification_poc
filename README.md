@@ -81,6 +81,5 @@ Failure (missing/invalid input):
 
 ## Development Notes
 
-- `DEFAULT_MAX_IMAGE_BYTES` in `validation.py` is a configurable development safety limit, not a confirmed business requirement.
 - Do not commit AWS credentials, secrets, or real passport images.
 - See `docs/` for requirements, architecture, security, and task planning.
