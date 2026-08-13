@@ -61,7 +61,7 @@ The architecture consists of a simple serverless handler pattern designed to run
 
 ---
 
-## 5. Day 2 Work Being Implemented
+## 5. Completed Day 2 Work
 
 - **Extracted Details Data Model**: Introduced `ExtractedPassportDetails` to encapsulate first/last names and document expiry date extracted from passports.
 - **Verification Engine**: Implemented `verify_passport_details()` to evaluate name matching and document expiry.
@@ -72,10 +72,23 @@ The architecture consists of a simple serverless handler pattern designed to run
 
 ---
 
-## 6. Decisions and Out-of-Scope Items
+## 6. Completed Day 3 Work — Integration Flow
 
-- **Out of Scope (Day 2)**:
-  - **OCR/Document Extraction**: The validation layer assumes extraction has already occurred. Direct image analysis, OCR, or AWS Textract integrations are omitted from this phase.
-  - **AWS Deployments**: No AWS Terraform templates, S3 uploads, or live API Gateway integrations.
-  - **Storage & Security**: Image storage in S3, encryption keys (SSE-S3 vs SSE-KMS), and custom KMS config are deferred.
-  - **Alternative IDs**: Limited strictly to passport document verification. Driver's licenses or other government IDs are out of scope.
+- **Integrated Verification Handler**: Updated the API Lambda handler (`handler.py`) to execute the verification logic when `extracted_passport_details` is provided in the JSON request payload.
+- **Error Response Extensibility**: Updated the `VerificationResponse` data model to support a `failure_reasons` sequence. This allows returning error codes for business verification errors while keeping the base API payload response backward-compatible.
+- **Integration Test Coverage**: Added integration tests to `tests/test_handler.py` validating the full end-to-end flow:
+  - Valid passport structure and verification details -> returns 200 HTTP Success.
+  - Correct structure but wrong first/last name -> returns 400 with `FIRST_NAME_MISMATCH` / `LAST_NAME_MISMATCH`.
+  - Expired passport -> returns 400 with `PASSPORT_EXPIRED`.
+  - Multiple concurrent verification errors -> returns 400 containing all matching reasons.
+
+---
+
+## 7. Decisions and Out-of-Scope Items
+
+- **Out of Scope (Day 3)**:
+  - **OCR/Document Extraction**: The handler expects mock-extracted passport details via the payload for local integration testing. Direct OCR or AWS Textract integrations are omitted.
+  - **AWS Deployments**: Deployment configurations, Terraform, S3 uploads, IAM profiles, and AWS credentials setup.
+  - **Storage & Security**: Image storage in S3, encryption keys, KMS configuration.
+  - **Alternative IDs**: Exclusively supports passport document verification.
+

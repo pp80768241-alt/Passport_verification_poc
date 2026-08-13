@@ -13,9 +13,13 @@ class VerificationRequest:
 @dataclass(frozen=True)
 class VerificationResponse:
     success: bool
+    failure_reasons: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, bool]:
-        return {"success": self.success}
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"success": self.success}
+        if self.failure_reasons:
+            data["failure_reasons"] = list(self.failure_reasons)
+        return data
 
 
 @dataclass(frozen=True)

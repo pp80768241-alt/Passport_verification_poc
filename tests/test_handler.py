@@ -93,3 +93,96 @@ def test_empty_body_returns_failure():
 
     assert response["statusCode"] == 400
     assert json.loads(response["body"]) == {"success": False}
+
+
+def test_integration_valid_passport(synthetic_image_base64):
+    event = build_event(
+        {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "passport_image": synthetic_image_base64,
+            "extracted_passport_details": {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "expiry_date": "2030-12-31",
+            },
+        }
+    )
+
+    response = lambda_handler(event, FakeContext())
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == {"success": True}
+
+
+def test_integration_wrong_first_name(synthetic_image_base64):
+    event = build_event(
+        {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "passport_image": synthetic_image_base64,
+            "extracted_passport_details": {
+                "first_name": "John",
+                "last_name": "Doe",
+                "expiry_date": "2030-12-31",
+            },
+        }
+    )
+
+    response = lambda_handler(event, FakeContext())
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert body["success"] is False
+    assert body["failure_reasons"] == ["FIRST_NAME_MISMATCH"]
+
+
+def test_integration_expired_passport(synthetic_image_base64):
+    event = build_event(
+        {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "passport_image": synthetic_image_base64,
+            "reference_date": "2026-08-13",
+            "extracted_passport_details": {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "expiry_date": "2026-08-12",
+            },
+        }
+    )
+
+    response = lambda_handler(event, FakeContext())
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert body["success"] is False
+    assert body["failure_reasons"] == ["PASSPORT_EXPIRED"]
+
+
+def test_integration_multiple_failures(synthetic_image_base64):
+    event = build_event(
+        {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "passport_image": synthetic_image_base64,
+            "reference_date": "2026-08-13",
+            "extracted_passport_details": {
+                "first_name": "John",
+                "last_name": "Smith",
+                "expiry_date": "2026-08-12",
+            },
+        }
+    )
+
+    response = lambda_handler(event, FakeContext())
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert body["success"] is False
+    assert set(body["failure_reasons"]) == {
+        "FIRST_NAME_MISMATCH",
+        "LAST_NAME_MISMATCH",
+        "PASSPORT_EXPIRED",
+    }
+
