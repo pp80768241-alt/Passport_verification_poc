@@ -84,11 +84,21 @@ The architecture consists of a simple serverless handler pattern designed to run
 
 ---
 
-## 7. Decisions and Out-of-Scope Items
+## 7. AWS Lambda Deployment Milestone
 
-- **Out of Scope (Day 3)**:
+- **AWS Setup**: Region `us-east-1`, root/admin MFA enabled, and zero-spend budget alert configured.
+- **IAM Configuration**: Execution role `PassportVerificationLambdaRole` created with basic Lambda execution permissions.
+- **Lambda Function**: Created function `passport-verification-poc` using Python 3.12 runtime.
+- **Handler Configuration**: Configured handler entry point `passport_verification.handler.lambda_handler`.
+- **Deployment Package**: Packaged and deployed via `lambda-deployment.zip`.
+- **Invocation & Verification**: Executed live Lambda test invocation resulting in HTTP 200 status code with body `{"success": true}`.
+
+---
+
+## 8. Decisions and Out-of-Scope Items
+
+- **Out of Scope**:
   - **OCR/Document Extraction**: The handler expects mock-extracted passport details via the payload for local integration testing. Direct OCR or AWS Textract integrations are omitted.
-  - **AWS Deployments**: Deployment configurations, Terraform, S3 uploads, IAM profiles, and AWS credentials setup.
   - **Storage & Security**: Image storage in S3, encryption keys, KMS configuration.
   - **Alternative IDs**: Exclusively supports passport document verification.
 

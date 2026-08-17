@@ -41,3 +41,5 @@ uploads/
 # OS
 .DS_Store
 Thumbs.db
+
+lambda-deployment.zip
