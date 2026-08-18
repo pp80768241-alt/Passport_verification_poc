@@ -99,6 +99,28 @@ The architecture consists of a simple serverless handler pattern designed to run
 
 - **Out of Scope**:
   - **OCR/Document Extraction**: The handler expects mock-extracted passport details via the payload for local integration testing. Direct OCR or AWS Textract integrations are omitted.
-  - **Storage & Security**: Image storage in S3, encryption keys, KMS configuration.
   - **Alternative IDs**: Exclusively supports passport document verification.
+  - **KMS / Custom Encryption**: Uses default S3 server-side encryption without custom KMS configuration.
 
+ 
+ ## 9. API Gateway Deployment Milestone
+
+- Created `passport-verification-api` as an AWS HTTP API in `us-east-1`.
+- Configured route: `POST /verify-passport`.
+- Connected the route to Lambda function `passport-verification-poc`.
+- Configured the `$default` stage with auto-deploy enabled.
+- Successfully tested the API from PowerShell using a POST request.
+- Confirmed the request reached API Gateway and invoked the Lambda function successfully.
+- Confirmed the end-to-end API response was successful.
+
+---
+
+## 10. S3 Image Storage Integration
+
+- **S3 Bucket Created**: Private S3 bucket `passport-verification-poc-2004-pp` created in AWS region `us-east-1`.
+- **Lambda IAM Permissions**: Configured inline IAM policy `PassportVerificationS3Access` attached to execution role `PassportVerificationLambdaRole` granting `s3:PutObject` permissions.
+- **Storage Module**: Created [`storage.py`](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/storage.py) providing `upload_passport_image()` for uploading decoded image bytes using `boto3`.
+- **Object Key Strategy**: Uploads images under the `passports/` prefix using unique UUID keys (`passports/<uuid4>.bin`).
+- **Environment Configuration**: Configured bucket resolution via `PASSPORT_BUCKET` environment variable with default fallback to `passport-verification-poc-2004-pp`.
+- **Error Handling**: Gracefully handles `BotoCoreError` / `ClientError` with `S3UploadError`, logging internal details without exposing credentials/traces, and returning controlled HTTP 500 error responses.
+- **Unit Testing**: Added [`test_storage.py`](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/tests/test_storage.py) with unit tests for upload verification, unique key generation, bucket configuration, and S3 client error handling.

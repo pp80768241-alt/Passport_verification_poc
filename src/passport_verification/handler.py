@@ -1,9 +1,11 @@
+import base64
 import json
 import logging
 from typing import Any
 
 from passport_verification.models import VerificationResponse
 from passport_verification.response import build_api_gateway_response
+from passport_verification.storage import S3UploadError, upload_passport_image
 from passport_verification.validation import validate_request_payload
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,26 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "Request passed structural validation",
         extra={"request_id": request_id},
     )
+
+    assert validation_result.request is not None
+    try:
+        image_bytes = base64.b64decode(
+            validation_result.request.passport_image, validate=True
+        )
+        object_key = upload_passport_image(image_bytes)
+        logger.info(
+            "Passport image uploaded to S3",
+            extra={"request_id": request_id, "object_key": object_key},
+        )
+    except S3UploadError as e:
+        logger.error(
+            "Failed to upload passport image to S3",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        return build_api_gateway_response(
+            status_code=500,
+            response=VerificationResponse(success=False),
+        )
 
     if payload is not None:
         extracted_data = payload.get("extracted_passport_details")

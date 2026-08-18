@@ -1,12 +1,26 @@
 import base64
 import json
 
+from unittest.mock import patch
+
+import pytest
+
 from passport_verification.handler import lambda_handler
+from passport_verification.storage import S3UploadError
 from tests.conftest import build_event
 
 
 class FakeContext:
     aws_request_id = "test-request-id"
+
+
+@pytest.fixture(autouse=True)
+def mock_s3_upload():
+    with patch(
+        "passport_verification.handler.upload_passport_image",
+        return_value="passports/test-key.bin",
+    ) as mock:
+        yield mock
 
 
 def test_valid_request_returns_success(synthetic_image_base64):
@@ -185,4 +199,24 @@ def test_integration_multiple_failures(synthetic_image_base64):
         "LAST_NAME_MISMATCH",
         "PASSPORT_EXPIRED",
     }
+
+
+def test_s3_upload_failure_returns_500(synthetic_image_base64):
+    event = build_event(
+        {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "passport_image": synthetic_image_base64,
+        }
+    )
+
+    with patch(
+        "passport_verification.handler.upload_passport_image",
+        side_effect=S3UploadError("S3 Connection failed"),
+    ):
+        response = lambda_handler(event, FakeContext())
+
+    assert response["statusCode"] == 500
+    assert json.loads(response["body"]) == {"success": False}
+
 
