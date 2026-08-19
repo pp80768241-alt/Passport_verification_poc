@@ -1,126 +1,238 @@
-# Project Notes — Passport Verification POC
+# Project Notes — Passport Verification Proof of Concept (POC)
 
-This document captures the overall goal, architecture, scope boundaries, progress, and key technical decisions for the Passport Verification Proof of Concept (POC).
-
----
-
-## 1. Project Goal
-
-The primary goal of this Proof of Concept (POC) is to build a secure, lightweight AWS-based passport verification flow. It serves as a foundation for verifying uploaded passport document details against a logged-in user's profile before confirming verification.
+This document is a comprehensive, beginner-friendly guide to the current design, implementation, and deployment state of the Passport Verification POC. It explains all technical elements, code flows, AWS resources, security rules, and testing procedures.
 
 ---
 
-## 2. Current Architecture
+## 1. Project Purpose and Scope
 
-The architecture consists of a simple serverless handler pattern designed to run locally or as an AWS Lambda function:
+### Purpose
+The goal of this Proof of Concept (POC) is to build a secure, lightweight AWS-based passport verification backend. It serves as a foundation for verifying uploaded passport document details against a user's expected profile data (e.g., first and last name) before confirming their identity.
 
+### Scope Boundaries
+*   **In-Scope (Current Implementation)**:
+    *   **Payload Structural Validation**: Checking that the payload contains required fields and that the image is a valid base64 string.
+    *   **Secure Storage**: Decoding the base64 passport image and uploading it securely to AWS S3.
+    *   **Verification Engine**: Comparing extracted passport details (supplied in the request payload) against the expected profile details (also in the payload), including name normalization and document expiry checks.
+    *   **Lambda Orchestration**: A Lambda handler that parses requests, invokes validation, stores images, and invokes verification.
+*   **Out-of-Scope (Future Phase)**:
+    *   **Automated OCR / Text Extraction**: The Lambda function does not currently extract text from the passport image. Instead, mock-extracted details (`extracted_passport_details`) are provided directly in the incoming API request payload for testing verification logic. Implementing OCR (e.g., via AWS Textract) is left for a future phase.
+    *   **Alternative Forms of Identification**: The system currently supports passport document verification only.
+    *   **Custom KMS Key Encryption**: The S3 bucket uses standard Amazon S3 managed server-side encryption (SSE-S3) without custom KMS keys.
+
+---
+
+## 2. Technical Architecture
+
+The POC uses a serverless request-driven architecture:
+
+```text
+       [ Client Request ]
+               │  POST /verify-passport (first_name, last_name, passport_image, extracted_details)
+               ▼
+┌──────────────────────────────┐
+│    API Gateway HTTP API      │  (Exposes endpoint, forwards route to Lambda)
+└──────────────┬───────────────┘
+               │
+               ▼  Invokes
+┌──────────────────────────────┐
+│  AWS Lambda Function         │  (Orchestrates flow in src/passport_verification/handler.py)
+└──────────────┬───────────────┘
+               ├──────────────────────────────────────────────┐
+               ▼ (Step 1: Validate payload structure)          ▼ (Step 2: Upload decoded image)
+┌──────────────────────────────┐              ┌──────────────────────────────┐
+│ Structural Validation        │              │ Amazon S3 Storage            │
+│ (validation.py)              │              │ (storage.py)                 │
+└──────────────────────────────┘              │ Target Bucket:               │
+                                              │ - passport-verification-poc- │
+                                              │   2004-pp                    │
+                                              │ Folder Prefix:               │
+                                              │ - passports/                 │
+                                              └──────────────────────────────┘
+               │
+               ▼ (Step 3: Run verification logic)
+┌──────────────────────────────┐
+│ Verification Engine          │
+│ (verification.py)            │
+└──────────────────────────────┘
 ```
-[Client Request]
-       │ (first_name, last_name, base64 passport_image)
-       ▼
-┌──────────────────────────────────────────────┐
-│ AWS Lambda / Local Handler (handler.py)      │
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼ Parse request payload
-┌──────────────────────────────────────────────┐
-│ Payload Structural Validation (validation.py)│
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼ Match expected fields & Expiry check
-┌──────────────────────────────────────────────┐
-│ Passport Verification Engine (verification.py)│
-└──────────────────────────────────────────────┘
+
+### Flow Breakdown for Beginners:
+1.  **Client POST Request**: A client submits a JSON payload to the API Gateway endpoint (`POST /verify-passport`).
+2.  **API Gateway Routing**: API Gateway receives the HTTP request and triggers the Lambda function.
+3.  **Structural Validation**: The Lambda handler verifies that the request has the correct schema (non-empty fields, valid base64 encoding).
+4.  **S3 Image Upload**: The Lambda handler decodes the base64 image into raw bytes and uploads it to a private S3 bucket.
+5.  **Passport Verification**: The Lambda handler compares the user's expected names and the details extracted from the document (checking name matches and expiration).
+6.  **HTTP Response**: The handler returns a success status (HTTP 200) or structured failure reason list (HTTP 400 or HTTP 500).
+
+---
+
+## 3. Python Project Structure
+
+The project code is organized under `src/` and `tests/` directories as follows:
+
+```text
+.
+├── PROJECT_NOTES.md                      <-- This documentation file
+├── README.md                             <-- Setup and run instructions
+├── requirements.txt                      <-- Core dependencies (boto3)
+├── requirements-dev.txt                  <-- Dev dependencies (pytest)
+│
+├── src/
+│   └── passport_verification/
+│       ├── __init__.py                   <-- Packages exports
+│       ├── handler.py                    <-- Lambda entry point & routing orchestration
+│       ├── models.py                     <-- Immutable data structures (dataclasses)
+│       ├── response.py                   <-- Formats responses for API Gateway integration
+│       ├── storage.py                    <-- Handles uploading images to AWS S3
+│       ├── validation.py                 <-- Performs request shape/structural validation
+│       └── verification.py               <-- Contains passport business logic (name/expiry)
+│
+└── tests/
+    ├── __init__.py                       <-- Pytest marker
+    ├── conftest.py                       <-- Pytest fixtures (synthetic image, event builder)
+    ├── test_handler.py                   <-- Tests the integration flow & error codes
+    ├── test_storage.py                   <-- Tests S3 upload, configuration & errors
+    ├── test_validation.py                <-- Tests payload validation rules
+    └── test_verification.py              <-- Tests name matching & expiry business logic
 ```
 
-- **Models (`models.py`)**: Defines clean immutable types (`VerificationRequest`, `ExtractedPassportDetails`, `PassportVerificationResult`, `VerificationResponse`, `ApiGatewayResponse`).
-- **Request Parsing (`handler.py`)**: Extract API Gateway events, decodes JSON payloads, and handles error response mapping.
-- **Structural Validation (`validation.py`)**: Sanitizes inputs (non-empty strings, trims spaces) and validates base64 structure and integrity of the uploaded image.
-- **Verification Logic (`verification.py`)**: Compares extracted document details against expected user parameters.
+### Explanation of Files:
+*   [handler.py](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/handler.py): Orchestrates the entire application flow. It parses incoming event JSON bodies, catches validation and S3 upload exceptions, and calls the verification engine.
+*   [models.py](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/models.py): Defines data structures using Python `@dataclass(frozen=True)` to represent request/response data cleanly and safely (guaranteeing immutability).
+*   [validation.py](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/validation.py): Performs sanity checks on the request shape before doing any AWS operations.
+*   [verification.py](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/verification.py): Implements business verification constraints (comparing names and dates).
+*   [storage.py](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/storage.py): Connects to AWS S3 using `boto3` to store raw passport document images.
+*   [response.py](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/response.py): Wraps results in an API Gateway HTTP API v2 integration structure.
 
 ---
 
-## 3. Nikhil's Confirmed Scope
+## 4. Code Execution and Verification Flows
 
-- **AWS Stack**: Tailored for execution under AWS Lambda in `us-east-1`.
-- **Response Format**: Basic success/failure response matching API Gateway integration specifications.
-- **Business Controls**:
-  - Validates document is an acceptable passport.
-  - Matches first and last name against logged-in user profile attributes.
-  - Validates document is not expired.
+### A. Request Structural Validation Flow
+Before processing any data or invoking AWS resources, the system validates the incoming JSON structure using `validate_request_payload` in `validation.py`.
 
----
+1.  **Field Existence**: Verifies that `first_name`, `last_name`, and `passport_image` fields are present in the JSON body.
+2.  **Field Format**: Verifies that all three fields are strings and are not empty or solely whitespace (using `.strip()`).
+3.  **Base64 Image Decoding**: Validates that `passport_image` is a valid base64-encoded string. It uses `base64.b64decode(..., validate=True)` to enforce strict padding and encoding checks.
+4.  **Empty Image Check**: Asserts that the decoded byte array has a length greater than `0`.
 
-## 4. Completed Day 1 Work
+If any of these structural checks fail, the validation flow stops immediately, returns `is_valid = False`, and the handler responds with an HTTP 400 Bad Request error.
 
-- **Local Repository Setup**: Scaffolded Python project, standard layout, dependencies config.
-- **Lambda Handler**: Created API Gateway handler in `handler.py` to parse payloads.
-- **Structural Validation**: Implemented request body type verification and strict base64 decoding check in `validation.py`.
-- **Dev Limit Removal**: Cleaned up the 5MB image size limit logic from the validation path and tests, keeping only Day 1 core structural logic.
-- **Test coverage**: Created unit tests covering structural request failure scenarios.
+### B. Passport Verification Flow
+Once the payload structure is validated and the image is stored, the handler performs business logic validation using `verify_passport_details` in `verification.py`.
 
----
-
-## 5. Completed Day 2 Work
-
-- **Extracted Details Data Model**: Introduced `ExtractedPassportDetails` to encapsulate first/last names and document expiry date extracted from passports.
-- **Verification Engine**: Implemented `verify_passport_details()` to evaluate name matching and document expiry.
-  - **Name Matching**: Normalized matching with case insensitivity and whitespace trimming.
-  - **Expiry Verification**: Expiry date compared against reference date (or current date `date.today()`).
-- **Result Structure**: Introduced `PassportVerificationResult` displaying boolean outcomes for name matches, expiration checks, and a tuple of `failure_reasons` if any checks fail.
-- **Unit Testing**: Implemented 9 unit tests checking validation success/failure paths, normalization edge cases, and date limits.
+1.  **Name Normalization**:
+    *   Names are stripped of leading/trailing whitespaces.
+    *   Names are compared case-insensitively (e.g. `"Jane"` matches `"  jane  "`).
+2.  **Expiry Check**:
+    *   Compares the passport's `expiry_date` (extracted details) against a `reference_date` (defaults to today's date using `date.today()`).
+    *   A passport is valid (not expired) if its expiry date is **greater than or equal to** the reference date.
+3.  **Failure Logging**:
+    *   If any verification check fails, specific code identifiers are added to a list:
+        *   `FIRST_NAME_MISMATCH`
+        *   `LAST_NAME_MISMATCH`
+        *   `PASSPORT_EXPIRED`
+4.  **Result Aggregation**: Returns a consolidated response listing all failures, allowing the client to correct all mistakes at once.
 
 ---
 
-## 6. Completed Day 3 Work — Integration Flow
+## 5. AWS Resource Configurations
 
-- **Integrated Verification Handler**: Updated the API Lambda handler (`handler.py`) to execute the verification logic when `extracted_passport_details` is provided in the JSON request payload.
-- **Error Response Extensibility**: Updated the `VerificationResponse` data model to support a `failure_reasons` sequence. This allows returning error codes for business verification errors while keeping the base API payload response backward-compatible.
-- **Integration Test Coverage**: Added integration tests to `tests/test_handler.py` validating the full end-to-end flow:
-  - Valid passport structure and verification details -> returns 200 HTTP Success.
-  - Correct structure but wrong first/last name -> returns 400 with `FIRST_NAME_MISMATCH` / `LAST_NAME_MISMATCH`.
-  - Expired passport -> returns 400 with `PASSPORT_EXPIRED`.
-  - Multiple concurrent verification errors -> returns 400 containing all matching reasons.
+### AWS Lambda
+*   **Function Name**: `passport-verification-poc`
+*   **Runtime**: Python 3.12
+*   **Handler**: `passport_verification.handler.lambda_handler`
+*   **Role**: Attached to `PassportVerificationLambdaRole`
+*   **Deployment**: Package is zipped into `lambda-deployment.zip` and uploaded to the Lambda service.
+
+### API Gateway HTTP API
+*   **API Name**: `passport-verification-api`
+*   **Route**: `POST /verify-passport`
+*   **Integration**: Configured as an AWS Lambda integration pointing directly to the `passport-verification-poc` Lambda function.
+*   **Stage**: `$default` stage (auto-deploy enabled) allowing immediate live endpoint testing.
+
+### S3 Image Storage Bucket
+*   **Bucket Name**: `passport-verification-poc-2004-pp` (private bucket located in AWS region `us-east-1`).
+*   **Object Prefix (Directory)**: All decoded passport images are stored under the `passports/` folder.
+*   **Key Strategy**: To prevent name collisions and protect user identities, files are stored as `passports/<UUIDv4>.bin` (e.g., `passports/123e4567-e89b-12d3-a456-426614174000.bin`).
+*   **Environment Variable**: The environment variable `PASSPORT_BUCKET` controls which bucket to upload to. If it is not set, the code falls back to using the default bucket `passport-verification-poc-2004-pp`.
+
+### S3 Error Handling & S3UploadError
+*   The upload logic is wrapped in a `try...except` block in `storage.py`.
+*   It catches `BotoCoreError` and `ClientError` (from the `botocore` package) and raises a custom `S3UploadError`.
+*   The Lambda `handler.py` catches `S3UploadError` and:
+    1.  Logs the internal error message for developers in AWS CloudWatch.
+    2.  Returns a generic HTTP 500 Internal Server Error message (`{"success": false}`) to the client. This hides internal AWS architecture details and prevents security exposure of AWS credentials/tracebacks to API clients.
+
+### AWS IAM Roles & Policies
+*   **IAM Execution Role**: `PassportVerificationLambdaRole`. This role allows the Lambda function to execute and write logs to AWS CloudWatch.
+*   **Inline IAM Policy**: `PassportVerificationS3Access`. Attached to the Lambda execution role. It grants least-privilege access, permitting only `s3:PutObject` on the target bucket and paths:
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": "s3:PutObject",
+                "Resource": "arn:aws:s3:::passport-verification-poc-2004-pp/passports/*"
+            }
+        ]
+    }
+    ```
 
 ---
 
-## 7. AWS Lambda Deployment Milestone
+## 6. Automated Testing (31 Tests Passed)
 
-- **AWS Setup**: Region `us-east-1`, root/admin MFA enabled, and zero-spend budget alert configured.
-- **IAM Configuration**: Execution role `PassportVerificationLambdaRole` created with basic Lambda execution permissions.
-- **Lambda Function**: Created function `passport-verification-poc` using Python 3.12 runtime.
-- **Handler Configuration**: Configured handler entry point `passport_verification.handler.lambda_handler`.
-- **Deployment Package**: Packaged and deployed via `lambda-deployment.zip`.
-- **Invocation & Verification**: Executed live Lambda test invocation resulting in HTTP 200 status code with body `{"success": true}`.
+We have a robust test suite of **31 tests** using the `pytest` framework. All tests run locally using mock data and virtual environments, keeping test execution decoupled from live AWS systems.
 
----
+### Run Command
+```bash
+python -m pytest tests/ -v
+```
 
-## 8. Decisions and Out-of-Scope Items
-
-- **Out of Scope**:
-  - **OCR/Document Extraction**: The handler expects mock-extracted passport details via the payload for local integration testing. Direct OCR or AWS Textract integrations are omitted.
-  - **Alternative IDs**: Exclusively supports passport document verification.
-  - **KMS / Custom Encryption**: Uses default S3 server-side encryption without custom KMS configuration.
-
- 
- ## 9. API Gateway Deployment Milestone
-
-- Created `passport-verification-api` as an AWS HTTP API in `us-east-1`.
-- Configured route: `POST /verify-passport`.
-- Connected the route to Lambda function `passport-verification-poc`.
-- Configured the `$default` stage with auto-deploy enabled.
-- Successfully tested the API from PowerShell using a POST request.
-- Confirmed the request reached API Gateway and invoked the Lambda function successfully.
-- Confirmed the end-to-end API response was successful.
+### Test Case Overview:
+*   **End-to-End API Integration Tests (`test_handler.py`)**:
+    *   **Success Test**: Verifies that a valid JSON request payload containing valid structural details and valid `extracted_passport_details` results in HTTP 200 and `{"success": true}`.
+    *   **Failure Tests**: Verifies that wrong fields return HTTP 400 and appropriate error lists. For example:
+        *   Wrong first name: returns `{"success": false, "failure_reasons": ["FIRST_NAME_MISMATCH"]}`.
+        *   Expired passport: returns `{"success": false, "failure_reasons": ["PASSPORT_EXPIRED"]}`.
+        *   Multiple concurrent errors: returns all matching error codes (e.g. `FIRST_NAME_MISMATCH`, `LAST_NAME_MISMATCH`, `PASSPORT_EXPIRED`).
+    *   **S3 Upload Integration Error Test**: Mocks S3 upload failure to verify the handler catches it and returns HTTP 500.
+*   **S3 Upload Verification Tests (`test_storage.py`)**:
+    *   Verifies that the upload function generates unique keys under the `passports/` prefix.
+    *   Verifies default bucket fallback and custom bucket lookup via the `PASSPORT_BUCKET` environment variable.
+    *   Verifies that `botocore` client errors are caught and converted to `S3UploadError`.
+*   **Structural Validation Tests (`test_validation.py`)**:
+    *   Checks for missing or empty fields, spaces-only strings, invalid base64 padding, and empty images.
+*   **Passport Verification Logic Tests (`test_verification.py`)**:
+    *   Validates business criteria: normalizations, expiry boundaries (today, tomorrow, expired), reference date defaults, and multiple failure reasons.
 
 ---
 
-## 10. S3 Image Storage Integration
+## 7. Git and Version Control Status
 
-- **S3 Bucket Created**: Private S3 bucket `passport-verification-poc-2004-pp` created in AWS region `us-east-1`.
-- **Lambda IAM Permissions**: Configured inline IAM policy `PassportVerificationS3Access` attached to execution role `PassportVerificationLambdaRole` granting `s3:PutObject` permissions.
-- **Storage Module**: Created [`storage.py`](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/src/passport_verification/storage.py) providing `upload_passport_image()` for uploading decoded image bytes using `boto3`.
-- **Object Key Strategy**: Uploads images under the `passports/` prefix using unique UUID keys (`passports/<uuid4>.bin`).
-- **Environment Configuration**: Configured bucket resolution via `PASSPORT_BUCKET` environment variable with default fallback to `passport-verification-poc-2004-pp`.
-- **Error Handling**: Gracefully handles `BotoCoreError` / `ClientError` with `S3UploadError`, logging internal details without exposing credentials/traces, and returning controlled HTTP 500 error responses.
-- **Unit Testing**: Added [`test_storage.py`](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/tests/test_storage.py) with unit tests for upload verification, unique key generation, bucket configuration, and S3 client error handling.
+*   **Ignored Files**:
+    *   `lambda-package/` (contains build packages for Lambda deployment) and `lambda-deployment.zip` (the actual deployment zip) are excluded from version control.
+    *   This is enforced in the [.gitignore](file:///c:/Users/panwa/Desktop/Passport%20verification%20poc/.gitignore) file to prevent large, auto-generated binary files from bloating the Git history.
+*   **Git Status**:
+    *   The workspace working tree is clean. All source files and test scripts are fully committed.
+    *   No changes are automatically committed or pushed to GitHub as part of cleanup tasks.
+
+---
+
+## 8. Known Limitations and Future Improvements
+
+1.  **OCR Text Extraction**:
+    *   *Current limitation*: Verification parameters must be manually supplied in the payload for validation.
+    *   *Future improvement*: Integrate AWS Textract to automatically scan, read, and extract the names and expiry dates from the uploaded passport image directly within the Lambda function.
+2.  **Image Header & Content Validation**:
+    *   *Current limitation*: The validation package only checks base64 structure and size length. It does not verify if the decoded file is actually a PNG/JPG image or a spoofed file.
+    *   *Future improvement*: Read image magic bytes (e.g., using PIL/Pillow or standard image library checks) to verify that uploaded content matches allowed mime-types (PNG, JPEG).
+3.  **Image File-Size Limits**:
+    *   *Current limitation*: The payload size limit is handled by API Gateway (maximum payload limit of 10MB for HTTP APIs). No code limits are currently enforced.
+    *   *Future improvement*: Explicitly check the byte array size of the decoded passport image in the code and reject payloads larger than a configurable size (e.g., 5MB) early to save S3 storage and processing costs.
+4.  **Fine-Grained KMS Encryption**:
+    *   *Current limitation*: Default S3-managed encryption keys (SSE-S3) are used.
+    *   *Future improvement*: Transition to Customer Managed Keys (SSE-KMS) to enable stricter security auditing and access policies over raw passport images.
