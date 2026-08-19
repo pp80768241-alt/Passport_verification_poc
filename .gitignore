@@ -43,3 +43,5 @@ uploads/
 Thumbs.db
 
 lambda-deployment.zip
+
+lambda-package/
